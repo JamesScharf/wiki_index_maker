@@ -11,8 +11,8 @@ import markdown
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 import numpy as np
-from bert_embedding import BertEmbedding
-from nltk import sent_tokenize 
+from sklearn.feature_extraction.text import TfidfVectorizer
+
 
 class Parser:
     """
@@ -78,7 +78,7 @@ class Vectorizer:
     def __init__(self, wiki_folder_path):
         self.parsed_data = Parser(wiki_folder_path).extract_info()
         self.make_unique_filelinks()
-        self.bert_embedding = BertEmbedding()
+        self.make_text_vect()
         self.features = self.vectorize_all()
 
     def make_unique_filelinks(self):
@@ -88,9 +88,20 @@ class Vectorizer:
 
         self.unique_links = set()
         for doc_data in self.parsed_data:
-            self.unique_links.update(doc_data["links"])
-
+            self.unique_links.update(doc_data["file_links"])
         self.num_links = len(self.unique_links)
+
+    def make_text_vect(self):
+        
+        self.tfidf_vect = TfidfVectorizer(stop_words="english",
+                                          ngram_range=(1, 2))
+
+        corpus = []
+        
+        for x in self.parsed_data:
+            corpus.append(x["paragraphs"])
+
+        self.tfidf_vect.fit_transform(corpus)
 
     def vectorize_all(self):
         """
@@ -105,7 +116,11 @@ class Vectorizer:
             # each doc_data elemen is a dictionary
             vec = self.vectorize(doc_data)
             vecs.append(vec)
-            file_output.append("\t".join([str(x) for x in vec]))
+            if len(vec) != 0:
+
+                line_text = "\t".join([str(x) for x in vec])
+                line_text = doc_data["file_name"] + "\t" + line_text
+                file_output.append(line_text)
         
         text = "\n".join(file_output)
         output_file.write(text)
@@ -119,8 +134,9 @@ class Vectorizer:
         # find all the unique file links
         file_links = self.filelinks_to_vec(doc_data["file_links"])
         para_vecs = self.vectorize_text(doc_data["paragraphs"])
-
-        return file_links + para_vecs
+        
+        file_links.extend(para_vecs)
+        return file_links
 
     def filelinks_to_vec(self, link_data):
         """
@@ -128,13 +144,12 @@ class Vectorizer:
         """
 
         vec = []
-        link_set = set(link_data)
+        link_set = list(set(link_data))
         for i, link in enumerate(self.unique_links):
             if link in link_set:
                 vec.append(1)
             else:
                 vec.append(0)
-
         return vec
 
     def vectorize_text(self, text_str):
@@ -142,10 +157,8 @@ class Vectorizer:
         Given some string, transform
         it into a vector with BERT.
         """
-
-        tok_sentences = sent_tokenize(text_str)
-        vec = self.bert_embedding(tok_sentences)
-        return vec
+        result = self.tfidf_vect.transform([text_str])
+        return list(result[0].toarray())[0]
 
 
 if __name__ == "__main__":
