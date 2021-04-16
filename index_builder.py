@@ -3,12 +3,9 @@ Build a new index for my wiki in markdown format.
 """
 
 import pandas as pd
-from sklearn.cluster import AgglomerativeClustering
 from sklearn.preprocessing import normalize
-from scipy.cluster import hierarchy
-from scipy.cluster.hierarchy import dendrogram, linkage, fcluster
-from matplotlib import pyplot as plt
-import queue
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.neighbors import LocalOutlierFactor
 
 
 class Clusterer:
@@ -32,21 +29,17 @@ class Clusterer:
         """
         Produce clusters from the data
         """
-        Z = hierarchy.linkage(self.normalized_ft, method="ward")
-        # save specific heights
-        self.wiki_index_df = self.data[[self.data.columns[0]]]
-        self.wiki_index_df.columns = ["file_name"]
-        for i, x in enumerate(range(18, 27, 1)):
-            x = x / 10.0
-            clusters = fcluster(Z, t=x, criterion="distance")
-            self.wiki_index_df["clust_lvl_" + str(i)] = pd.Series(clusters)
-            print(f"Number of clusters at level {x}: {len(set(clusters))}")
-        print(self.wiki_index_df)
-        # now plot the dendrogram
-        plt.figure()
-        hierarchy.dendrogram(Z)
-        plt.show()
+        self.wiki_index_df = self.data
+        
+        # now do top-level clustering
+        clustering = AgglomerativeClustering(n_clusters=None, distance_threshold=1.6).fit(self.normalized_ft)
+        self.wiki_index_df["lvl_0"] = clustering.labels_ 
 
+        # now let's do some post-processing to create MISC category
+        #labels = LocalOutlierFactor(n_neighbors=2).fit_predict(self.normalized_ft)
+        #self.wiki_index_df["outlier"] = labels
+        #self.wiki_index_df.loc[self.wiki_index_df.outlier == -1, "lvl_0"] = -1
+        #self.wiki_index_df = self.wiki_index_df.sort_values(by=["lvl_0"])
 
 class Index_Creator:
     """
@@ -57,16 +50,22 @@ class Index_Creator:
     def __init__(self):
         self.clust = Clusterer()
         self.wiki_clusters = self.clust.wiki_index_df
-        self.get_layer(3)
+        self.draw_index()
 
-    
-    def get_layer(self, lvl):
+    def draw_index(self):
+        labels = self.wiki_clusters["lvl_0"].unique()
+        
+        print("# James Scharf's Wiki")
+        print("*This index has been automatically generated through clustering.*")
+        for l in labels:
+            print(f"## {l}")
 
-        labels = self.wiki_clusters["clust_lvl_" + str(lvl)].unique()
-        for cluster in labels:
-            subset = self.wiki_clusters[
-                    self.wiki_clusters["clust_lvl_" + str(lvl)] == cluster]
-            print(cluster, subset["file_name"].tolist())
+            def print_list(file_name):
+                print(f"\t-[[{file_name}]]")
+
+            subset = self.wiki_clusters[self.wiki_clusters["lvl_0"] == l]
+            subset[subset.columns[0]].apply(print_list)
+
 
 if __name__ == "__main__":
     Index_Creator()

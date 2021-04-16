@@ -5,13 +5,14 @@ dataset into vectors.
 
 from collections import defaultdict
 import argparse
-
+import pathlib
 import glob
 import markdown
 from tqdm import tqdm
 from bs4 import BeautifulSoup
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
+from sentence_transformers import SentenceTransformer
 
 
 class Parser:
@@ -44,7 +45,6 @@ class Parser:
         for raw_doc in tqdm(self.raw_docs, desc="Converting to html..."):
             html = markdown.markdown(raw_doc[1])
             converted.append((raw_doc[0], html))
-
         self.html_docs = converted
 
     def extract_info(self):
@@ -67,7 +67,7 @@ class Parser:
                                             soup.find_all("p")])
 
             parsed.append(data)
-
+        
         return parsed
 
 
@@ -76,10 +76,13 @@ class Vectorizer:
     Take each parsed element and convert it into a feature vector
     """
     def __init__(self, wiki_folder_path):
+        self.model = SentenceTransformer('stsb-roberta-base')
+        self.wiki_folder_path = wiki_folder_path
         self.parsed_data = Parser(wiki_folder_path).extract_info()
         self.make_unique_filelinks()
-        self.make_text_vect()
+        self.make_char_vect()
         self.features = self.vectorize_all()
+
 
     def make_unique_filelinks(self):
         """
@@ -91,16 +94,16 @@ class Vectorizer:
             self.unique_links.update(doc_data["file_links"])
         self.num_links = len(self.unique_links)
 
-    def make_text_vect(self):
+    def make_char_vect(self):
         
-        self.tfidf_vect = TfidfVectorizer(stop_words="english",
-                                          ngram_range=(1, 2))
+        self.tfidf_vect = TfidfVectorizer(ngram_range=(2, 2),
+                                          analyzer="char")
 
         corpus = []
         
         for x in self.parsed_data:
             corpus.append(x["paragraphs"])
-
+        
         self.tfidf_vect.fit_transform(corpus)
 
     def vectorize_all(self):
@@ -134,8 +137,17 @@ class Vectorizer:
         # find all the unique file links
         file_links = self.filelinks_to_vec(doc_data["file_links"])
         para_vecs = self.vectorize_text(doc_data["paragraphs"])
+        para_vecs = list(para_vecs)
         
+        # get last time modified
+        fi = pathlib.Path(self.wiki_folder_path + doc_data["file_name"])
+        #time = fi.stat().st_mtime / 10000000
+        #time = np.log(time)
         file_links.extend(para_vecs)
+        #file_links.append(time)
+
+        char_vec = self.vectorize_char(doc_data["paragraphs"])
+        file_links.extend(char_vec)
         return file_links
 
     def filelinks_to_vec(self, link_data):
@@ -157,9 +169,14 @@ class Vectorizer:
         Given some string, transform
         it into a vector with BERT.
         """
+        #result = self.tfidf_vect.transform([text_str])
+        #return list(result[0].toarray())[0]
+        result = self.model.encode(text_str)
+        return result
+
+    def vectorize_char(self, text_str):
         result = self.tfidf_vect.transform([text_str])
         return list(result[0].toarray())[0]
-
 
 if __name__ == "__main__":
     argparser = argparse.ArgumentParser()
